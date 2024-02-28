@@ -53,9 +53,18 @@ type Options struct {
 
 func NewMuxer(options Options) *Muxer {
 	tmp := Muxer{Options: options, ClientACK: time.NewTimer(time.Second * 20), StreamACK: time.NewTimer(time.Second * 20), streams: make(map[int8]*Stream)}
-	//go tmp.WaitCloser()
+	pc, err := tmp.NewPeerConnection(webrtc.Configuration{
+		SDPSemantics: webrtc.SDPSemanticsUnifiedPlanWithFallback,
+	})
+
+	if err != nil {
+		return nil
+	}
+
+	tmp.pc = pc
 	return &tmp
 }
+
 func (element *Muxer) NewPeerConnection(configuration webrtc.Configuration) (*webrtc.PeerConnection, error) {
 	if len(element.Options.ICEServers) > 0 {
 		log.Println("Set ICEServers", element.Options.ICEServers)
@@ -90,7 +99,12 @@ func (element *Muxer) NewPeerConnection(configuration webrtc.Configuration) (*we
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(s))
 	return api.NewPeerConnection(configuration)
 }
+
 func (element *Muxer) WriteHeader(streams []av.CodecData, sdp64 string) (string, error) {
+	if element.pc == nil {
+		return "", errors.New("PeerConnection is not initialized")
+	}
+
 	var WriteHeaderSuccess bool
 	if len(streams) == 0 {
 		return "", ErrorNotFound
@@ -103,9 +117,7 @@ func (element *Muxer) WriteHeader(streams []av.CodecData, sdp64 string) (string,
 		Type: webrtc.SDPTypeOffer,
 		SDP:  string(sdpB),
 	}
-	peerConnection, err := element.NewPeerConnection(webrtc.Configuration{
-		SDPSemantics: webrtc.SDPSemanticsUnifiedPlanWithFallback,
-	})
+
 	if err != nil {
 		return "", err
 	}
@@ -127,7 +139,7 @@ func (element *Muxer) WriteHeader(streams []av.CodecData, sdp64 string) (string,
 				if err != nil {
 					return "", err
 				}
-				if rtpSender, err := peerConnection.AddTrack(track); err != nil {
+				if rtpSender, err := element.pc.AddTrack(track); err != nil {
 					return "", err
 				} else {
 					go func() {
@@ -161,7 +173,7 @@ func (element *Muxer) WriteHeader(streams []av.CodecData, sdp64 string) (string,
 			if err != nil {
 				return "", err
 			}
-			if rtpSender, err := peerConnection.AddTrack(track); err != nil {
+			if rtpSender, err := element.pc.AddTrack(track); err != nil {
 				return "", err
 			} else {
 				go func() {
@@ -179,30 +191,29 @@ func (element *Muxer) WriteHeader(streams []av.CodecData, sdp64 string) (string,
 	if len(element.streams) == 0 {
 		return "", ErrorNotTrackAvailable
 	}
-	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
+	element.pc.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		element.status = connectionState
 		if connectionState == webrtc.ICEConnectionStateDisconnected {
 			element.Close()
 		}
 	})
-	peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
+	element.pc.OnDataChannel(func(d *webrtc.DataChannel) {
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
 			element.ClientACK.Reset(5 * time.Second)
 		})
 	})
 
-	if err = peerConnection.SetRemoteDescription(offer); err != nil {
+	if err = element.pc.SetRemoteDescription(offer); err != nil {
 		return "", err
 	}
-	gatherCompletePromise := webrtc.GatheringCompletePromise(peerConnection)
-	answer, err := peerConnection.CreateAnswer(nil)
+	gatherCompletePromise := webrtc.GatheringCompletePromise(element.pc)
+	answer, err := element.pc.CreateAnswer(nil)
 	if err != nil {
 		return "", err
 	}
-	if err = peerConnection.SetLocalDescription(answer); err != nil {
+	if err = element.pc.SetLocalDescription(answer); err != nil {
 		return "", err
 	}
-	element.pc = peerConnection
 	waitT := time.NewTimer(time.Second * 10)
 	select {
 	case <-waitT.C:
@@ -210,10 +221,9 @@ func (element *Muxer) WriteHeader(streams []av.CodecData, sdp64 string) (string,
 	case <-gatherCompletePromise:
 		//Connected
 	}
-	resp := peerConnection.LocalDescription()
+	resp := element.pc.LocalDescription()
 	WriteHeaderSuccess = true
 	return base64.StdEncoding.EncodeToString([]byte(resp.SDP)), nil
-
 }
 
 func (element *Muxer) WritePacket(pkt av.Packet) (err error) {
