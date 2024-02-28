@@ -288,6 +288,10 @@ func (element *Muxer) WritePacket(pkt av.Packet) (err error) {
 	}
 }
 
+func (element *Muxer) GetPeerConnection() *webrtc.PeerConnection {
+	return element.pc
+}
+
 func (element *Muxer) Close() error {
 	element.stop = true
 	if element.pc != nil {
