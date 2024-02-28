@@ -144,6 +144,7 @@ func (element *Muxer) WritePacket(pkt av.Packet) (err error) {
 	return ErrorNotFound
 
 }
+
 func (element *Muxer) WaitCloser() {
 	select {
 	case <-element.ps:
@@ -162,6 +163,10 @@ func (element *Muxer) Close() error {
 		}
 	}
 	return nil
+}
+
+func (element *Muxer) GetPeerConnection() *webrtc.PeerConnection {
+	return element.pc
 }
 
 func getPayloadType(m webrtc.MediaEngine, codecType webrtc.RTPCodecType, codecName string) uint8 {
