@@ -24,13 +24,14 @@ var (
 )
 
 type Muxer struct {
-	streams   map[int8]*Stream
-	status    webrtc.ICEConnectionState
-	stop      bool
-	pc        *webrtc.PeerConnection
-	ClientACK *time.Timer
-	StreamACK *time.Timer
-	Options   Options
+	streams         map[int8]*Stream
+	status          webrtc.ICEConnectionState
+	stop            bool
+	pc              *webrtc.PeerConnection
+	ClientACK       *time.Timer
+	StreamACK       *time.Timer
+	Options         Options
+	ICECandidatesCh chan *webrtc.ICECandidateInit
 }
 type Stream struct {
 	codec av.CodecData
@@ -52,7 +53,9 @@ type Options struct {
 }
 
 func NewMuxer(options Options) *Muxer {
-	tmp := Muxer{Options: options, ClientACK: time.NewTimer(time.Second * 20), StreamACK: time.NewTimer(time.Second * 20), streams: make(map[int8]*Stream)}
+	tmp := Muxer{Options: options, ClientACK: time.NewTimer(time.Second * 20), StreamACK: time.NewTimer(time.Second * 20), streams: make(map[int8]*Stream),
+		ICECandidatesCh: make(chan *webrtc.ICECandidateInit, 256)}
+
 	pc, err := tmp.NewPeerConnection(webrtc.Configuration{
 		SDPSemantics: webrtc.SDPSemanticsUnifiedPlanWithFallback,
 	})
